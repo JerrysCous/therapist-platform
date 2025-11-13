@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+
+  therapistProfile TherapistProfile?
+  clientProfile    ClientProfile?
+
+  // Messages
+  sentMessages     Message[] @relation("MessagesSent")
+  receivedMessages Message[] @relation("MessagesReceived")
+
+  // Appointments
+  therapistAppointments Appointment[] @relation("TherapistAppointments")
+  clientAppointments    Appointment[] @relation("ClientAppointments")
+
+  // Therapist-client linking
+  therapistClients TherapistClient[] @relation("TherapistClients")
+  clientTherapists TherapistClient[] @relation("ClientTherapist")
+}
+
+model TherapistProfile {
+  id             Int     @id @default(autoincrement())
+  userId         Int     @unique
+  bio            String?
+  specialization String?
+  availability   String?
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model ClientProfile {
+  id               Int     @id @default(autoincrement())
+  userId           Int     @unique
+  notes            String?
+  preferences      String?
+  emergencyContact String?
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Message {
+  id         Int      @id @default(autoincrement())
+  senderId   Int
+  receiverId Int
+  text       String
+  createdAt  DateTime @default(now())
+
+  sender   User @relation("MessagesSent", fields: [senderId], references: [id])
+  receiver User @relation("MessagesReceived", fields: [receiverId], references: [id])
+}
+
+model Appointment {
+  id          Int               @id @default(autoincrement())
+  therapistId Int
+  clientId    Int
+  time        DateTime
+  status      AppointmentStatus @default(PENDING)
+
+  therapist User @relation("TherapistAppointments", fields: [therapistId], references: [id])
+  client    User @relation("ClientAppointments", fields: [clientId], references: [id])
+}
+
+model TherapistClient {
+  id          Int @id @default(autoincrement())
+  therapistId Int
+  clientId    Int
+
+  therapist User @relation("TherapistClients", fields: [therapistId], references: [id])
+  client    User @relation("ClientTherapist", fields: [clientId], references: [id])
+
+  @@unique([therapistId, clientId])
+}
+
+enum Role {
+  USER
+  THERAPIST
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
