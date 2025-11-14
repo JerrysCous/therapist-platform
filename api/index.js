@@ -156,7 +156,7 @@ app.get("/me", requireAuth, async (req, res) => {
 app.post(
   "/therapist/link-client",
   requireAuth,
-  requireRole(["THERAPIST", "INTERN", "PRACTICE_MANAGER_ADMIN", "OWNER"]),
+  requireRole("THERAPIST", "INTERN", "PRACTICE_MANAGER_ADMIN", "OWNER"),
   async (req, res) => {
     try {
       const { email } = req.body;
@@ -201,7 +201,7 @@ app.post(
 app.get(
   "/therapist/clients",
   requireAuth,
-  requireRole(["THERAPIST", "INTERN"]),
+  requireRole("THERAPIST", "INTERN"),
   async (req, res) => {
     try {
       const therapistId = req.user.id;
@@ -232,7 +232,7 @@ app.get(
 app.get(
   "/client/dashboard",
   requireAuth,
-  requireRole(["CLIENT"]),
+  requireRole("CLIENT"),
   async (req, res) => {
     try {
       const clientId = req.user.id;
@@ -298,7 +298,7 @@ app.post("/messages/send", requireAuth, async (req, res) => {
 });
 
 // ----------------------
-// GET MESSAGE THREAD
+// MESSAGE THREAD
 // ----------------------
 app.get("/messages/thread/:otherUserId", requireAuth, async (req, res) => {
   try {
@@ -379,13 +379,64 @@ app.get("/messages/list", requireAuth, async (req, res) => {
   }
 });
 
+
+// ----------------------
+// THERAPIST DASHBOARD
+// ----------------------
+app.get(
+  "/therapist/dashboard",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const therapistId = req.user.id;
+
+      const [clients, appointments, profile] = await Promise.all([
+        prisma.therapistClient.findMany({
+          where: { therapistId },
+          include: {
+            client: {
+              select: { id: true, name: true, email: true },
+            },
+          },
+        }),
+
+        prisma.appointment.findMany({
+          where: { therapistId },
+          include: {
+            client: { select: { id: true, name: true } },
+          },
+          orderBy: { time: "asc" },
+          take: 20,
+        }),
+
+        prisma.therapistProfile.findUnique({
+          where: { userId: therapistId },
+          select: { bio: true, specialization: true, availability: true },
+        }),
+      ]);
+
+      res.json({
+        profile,
+        clients: clients.map((c) => c.client),
+        appointments,
+      });
+    } catch (err) {
+      console.error("therapist/dashboard error:", err);
+      res.status(500).json({ error: "Failed to load therapist dashboard" });
+    }
+  }
+);
+
+
+
 // ----------------------
 // OWNER DASHBOARD
 // ----------------------
 app.get(
   "/owner/dashboard",
   requireAuth,
-  requireRole(["OWNER"]),
+  requireRole("OWNER"),
   async (req, res) => {
     try {
       const now = new Date();
@@ -470,3 +521,4 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`✅ Server running on http://127.0.0.1:${PORT}`);
 });
+

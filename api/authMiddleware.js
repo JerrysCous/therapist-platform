@@ -1,8 +1,7 @@
-import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
-console.log("JWT_SECRET loaded?", process.env.JWT_SECRET);
+dotenv.config(); // Load env FIRST
 
-dotenv.config();
+import jwt from "jsonwebtoken";
 
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization;
@@ -13,7 +12,6 @@ export function requireAuth(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Attach JWT payload to request
     req.user = {
       id: decoded.id,
       email: decoded.email,
@@ -26,14 +24,13 @@ export function requireAuth(req, res, next) {
   }
 }
 
-export function requireRole(role) {
+export function requireRole(...allowedRoles) {
   return (req, res, next) => {
-    if (req.user.role !== role) {
+    if (!allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ error: "Forbidden: Wrong role" });
     }
     next();
   };
-
-  
 }
+
 
