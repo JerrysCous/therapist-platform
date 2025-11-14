@@ -26,9 +26,9 @@ model User {
   therapistAppointments Appointment[] @relation("TherapistAppointments")
   clientAppointments    Appointment[] @relation("ClientAppointments")
 
-  // Therapist-client linking
-  therapistClients TherapistClient[] @relation("TherapistClients")
-  clientTherapists TherapistClient[] @relation("ClientTherapist")
+  // Linking (renamed model from TherapistClient → TherapistLink)
+  therapistLinks TherapistLink[] @relation("TherapistClients")
+  clientLinks    TherapistLink[] @relation("ClientTherapist")
 }
 
 model TherapistProfile {
@@ -73,7 +73,10 @@ model Appointment {
   client    User @relation("ClientAppointments", fields: [clientId], references: [id])
 }
 
-model TherapistClient {
+//
+// 🔥 FIXED MODEL — Renamed to avoid Prisma Studio bug
+//
+model TherapistLink {
   id          Int @id @default(autoincrement())
   therapistId Int
   clientId    Int
@@ -99,3 +102,4 @@ enum AppointmentStatus {
   COMPLETED
   CANCELLED
 }
+

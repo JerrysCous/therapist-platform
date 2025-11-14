@@ -12,16 +12,16 @@ app.use(cors());
 app.use(express.json());
 const prisma = new PrismaClient();
 
-// ----------------------
-// HEALTH CHECK
-// ----------------------
+/* -----------------------------
+   HEALTH CHECK
+----------------------------- */
 app.get("/", (req, res) => {
   res.send("🧠 Therapist API is running!");
 });
 
-// ----------------------
-// SIGNUP (PUBLIC ROLES ONLY)
-// ----------------------
+/* -----------------------------
+   SIGNUP
+----------------------------- */
 app.post("/signup", async (req, res) => {
   const { name, email, password, role } = req.body;
 
@@ -31,7 +31,7 @@ app.post("/signup", async (req, res) => {
 
     if (!ALLOWED_PUBLIC_ROLES.includes(selectedRole)) {
       return res.status(403).json({
-        error: `You cannot sign up as role: ${selectedRole}`,
+        error: `You cannot sign up as: ${selectedRole}`,
       });
     }
 
@@ -40,15 +40,12 @@ app.post("/signup", async (req, res) => {
 
     if (!strongPassword.test(password)) {
       return res.status(400).json({
-        error:
-          "Password must be at least 6 characters, include a number, and a special character.",
+        error: "Password must be 6+ chars, include a number + symbol",
       });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) {
-      return res.status(400).json({ error: "Email already registered" });
-    }
+    const exists = await prisma.user.findUnique({ where: { email } });
+    if (exists) return res.status(400).json({ error: "Email already registered" });
 
     const hashed = await hashPassword(password);
 
@@ -80,79 +77,54 @@ app.post("/signup", async (req, res) => {
 
     const token = generateToken(user);
 
-    res.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      token,
-    });
+    res.json({ user, token });
   } catch (err) {
     console.error("Signup error:", err);
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({ error: "Signup failed" });
   }
 });
 
-// ----------------------
-// LOGIN
-// ----------------------
+/* -----------------------------
+   LOGIN
+----------------------------- */
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   try {
     const user = await prisma.user.findUnique({ where: { email } });
-
     if (!user) return res.status(400).json({ error: "Invalid credentials" });
 
     const valid = await comparePasswords(password, user.password);
     if (!valid) return res.status(400).json({ error: "Invalid credentials" });
 
     const token = generateToken(user);
-
-    res.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      token,
-    });
+    res.json({ user, token });
   } catch (err) {
     console.error("Login error:", err);
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({ error: "Login failed" });
   }
 });
 
-// ----------------------
-// ME
-// ----------------------
+/* -----------------------------
+   ME (AUTH CHECK)
+----------------------------- */
 app.get("/me", requireAuth, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-      },
+      select: { id: true, name: true, email: true, role: true },
     });
-
-    if (!user) return res.status(404).json({ error: "User not found" });
 
     res.json({ user });
   } catch (err) {
     console.error("ME error:", err);
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({ error: "Failed to load user" });
   }
 });
 
-// ----------------------
-// LINK CLIENT TO THERAPIST
-// ----------------------
+/* -----------------------------
+   LINK CLIENT TO THERAPIST
+----------------------------- */
 app.post(
   "/therapist/link-client",
   requireAuth,
@@ -165,12 +137,11 @@ app.post(
       const therapistId = req.user.id;
 
       const client = await prisma.user.findUnique({ where: { email } });
-
       if (!client || client.role !== "CLIENT") {
-        return res.status(404).json({ error: "Client not found or invalid role." });
+        return res.status(404).json({ error: "Client not found" });
       }
 
-      const link = await prisma.therapistClient.upsert({
+      const link = await prisma.therapistLink.upsert({
         where: {
           therapistId_clientId: {
             therapistId,
@@ -184,20 +155,17 @@ app.post(
         },
       });
 
-      res.json({
-        message: "Client linked successfully",
-        link,
-      });
+      res.json({ message: "Client linked", link });
     } catch (err) {
       console.error("link-client error:", err);
-      res.status(500).json({ error: "Something went wrong" });
+      res.status(500).json({ error: "Linking failed" });
     }
   }
 );
 
-// ----------------------
-// THERAPIST CLIENT LIST
-// ----------------------
+/* -----------------------------
+   THERAPIST CLIENT LIST
+----------------------------- */
 app.get(
   "/therapist/clients",
   requireAuth,
@@ -206,12 +174,10 @@ app.get(
     try {
       const therapistId = req.user.id;
 
-      const links = await prisma.therapistClient.findMany({
+      const links = await prisma.therapistLink.findMany({
         where: { therapistId },
         include: {
-          client: {
-            select: { id: true, name: true, email: true },
-          },
+          client: { select: { id: true, name: true, email: true } },
         },
       });
 
@@ -221,7 +187,7 @@ app.get(
       });
     } catch (err) {
       console.error("therapist/clients error:", err);
-      res.status(500).json({ error: "Something went wrong" });
+      res.status(500).json({ error: "Failed to load client list" });
     }
   }
 );
@@ -237,152 +203,51 @@ app.get(
     try {
       const clientId = req.user.id;
 
-      const link = await prisma.therapistClient.findFirst({
-        where: { clientId },
-        include: {
-          therapist: {
-            select: { id: true, name: true, email: true },
+      const [link, appointments, profile] = await Promise.all([
+        prisma.therapistClient.findFirst({
+          where: { clientId },
+          include: {
+            therapist: {
+              select: { id: true, name: true, email: true },
+            },
           },
-        },
-      });
+        }),
 
-      const appointments = await prisma.appointment.findMany({
-        where: { clientId },
-        orderBy: { time: "asc" },
-      });
+        prisma.appointment.findMany({
+          where: { clientId },
+          include: {
+            therapist: { select: { id: true, name: true } },
+          },
+          orderBy: { time: "asc" },
+        }),
+
+        prisma.clientProfile.findUnique({
+          where: { userId: clientId },
+          select: {
+            notes: true,
+            preferences: true,
+            emergencyContact: true,
+          }
+        })
+      ]);
 
       res.json({
         clientId,
         therapist: link ? link.therapist : null,
-        appointments,
+        profile,
+        appointments
       });
     } catch (err) {
       console.error("client/dashboard error:", err);
-      res.status(500).json({ error: "Something went wrong" });
+      res.status(500).json({ error: "Failed to load client dashboard" });
     }
   }
 );
 
-// ----------------------
-// SEND MESSAGE
-// ----------------------
-app.post("/messages/send", requireAuth, async (req, res) => {
-  try {
-    const senderId = req.user.id;
-    const { receiverId, text } = req.body;
 
-    if (!receiverId || !text)
-      return res.status(400).json({ error: "receiverId and text required" });
-
-    const validLink = await prisma.therapistClient.findFirst({
-      where: {
-        OR: [
-          { therapistId: senderId, clientId: receiverId },
-          { therapistId: receiverId, clientId: senderId },
-        ],
-      },
-    });
-
-    if (!validLink)
-      return res.status(403).json({ error: "Unauthorized messaging" });
-
-    const msg = await prisma.message.create({
-      data: { senderId, receiverId, text },
-    });
-
-    res.json({ success: true, message: msg });
-  } catch (err) {
-    console.error("send-message error:", err);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
-
-// ----------------------
-// MESSAGE THREAD
-// ----------------------
-app.get("/messages/thread/:otherUserId", requireAuth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const otherUserId = parseInt(req.params.otherUserId);
-
-    const validLink = await prisma.therapistClient.findFirst({
-      where: {
-        OR: [
-          { therapistId: userId, clientId: otherUserId },
-          { therapistId: otherUserId, clientId: userId },
-        ],
-      },
-    });
-
-    if (!validLink)
-      return res.status(403).json({ error: "Unauthorized to view messages" });
-
-    const msgs = await prisma.message.findMany({
-      where: {
-        OR: [
-          { senderId: userId, receiverId: otherUserId },
-          { senderId: otherUserId, receiverId: userId },
-        ],
-      },
-      orderBy: { createdAt: "asc" },
-    });
-
-    res.json({ thread: msgs });
-  } catch (err) {
-    console.error("thread error:", err);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
-
-// ----------------------
-// MESSAGE LIST
-// ----------------------
-app.get("/messages/list", requireAuth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const role = req.user.role;
-
-    if (role === "THERAPIST" || role === "INTERN") {
-      const links = await prisma.therapistClient.findMany({
-        where: { therapistId: userId },
-        include: {
-          client: {
-            select: { id: true, name: true, email: true },
-          },
-        },
-      });
-
-      return res.json({
-        allowed: links.map((l) => l.client),
-      });
-    }
-
-    if (role === "CLIENT") {
-      const link = await prisma.therapistClient.findFirst({
-        where: { clientId: userId },
-        include: {
-          therapist: {
-            select: { id: true, name: true, email: true },
-          },
-        },
-      });
-
-      return res.json({
-        allowed: link ? [link.therapist] : [],
-      });
-    }
-
-    res.status(403).json({ error: "Role cannot use messaging." });
-  } catch (err) {
-    console.error("list error:", err);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
-
-
-// ----------------------
-// THERAPIST DASHBOARD
-// ----------------------
+/* -----------------------------
+   THERAPIST DASHBOARD
+----------------------------- */
 app.get(
   "/therapist/dashboard",
   requireAuth,
@@ -392,12 +257,10 @@ app.get(
       const therapistId = req.user.id;
 
       const [clients, appointments, profile] = await Promise.all([
-        prisma.therapistClient.findMany({
+        prisma.therapistLink.findMany({
           where: { therapistId },
           include: {
-            client: {
-              select: { id: true, name: true, email: true },
-            },
+            client: { select: { id: true, name: true, email: true } },
           },
         }),
 
@@ -428,11 +291,9 @@ app.get(
   }
 );
 
-
-
-// ----------------------
-// OWNER DASHBOARD
-// ----------------------
+/* -----------------------------
+   OWNER DASHBOARD
+----------------------------- */
 app.get(
   "/owner/dashboard",
   requireAuth,
@@ -444,8 +305,8 @@ app.get(
       const [
         totalUsers,
         owners,
-        practiceManagersAdmin,
-        practiceManagersClinical,
+        adminCount,
+        clinicalCount,
         therapists,
         interns,
         clients,
@@ -475,13 +336,7 @@ app.get(
         prisma.user.findMany({
           orderBy: { createdAt: "desc" },
           take: 10,
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            createdAt: true,
-          },
+          select: { id: true, name: true, email: true, role: true, createdAt: true },
         }),
       ]);
 
@@ -490,15 +345,13 @@ app.get(
           users: {
             total: totalUsers,
             owners,
-            practiceManagersAdmin,
-            practiceManagersClinical,
+            adminCount,
+            clinicalCount,
             therapists,
             interns,
             clients,
           },
-          messages: {
-            total: totalMessages,
-          },
+          messages: { total: totalMessages },
           appointments: {
             total: totalAppointments,
             upcomingCount: upcomingAppointments.length,
@@ -514,9 +367,9 @@ app.get(
   }
 );
 
-// ----------------------
-// START SERVER
-// ----------------------
+/* -----------------------------
+   START SERVER
+----------------------------- */
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`✅ Server running on http://127.0.0.1:${PORT}`);
