@@ -20,13 +20,21 @@ app.get("/", (req, res) => {
 });
 
 // ----------------------
-// SIGNUP
+// SIGNUP (PUBLIC ROLES ONLY)
 // ----------------------
 app.post("/signup", async (req, res) => {
   const { name, email, password, role } = req.body;
 
   try {
-    // Password validation
+    const ALLOWED_PUBLIC_ROLES = ["CLIENT", "THERAPIST", "INTERN"];
+    const selectedRole = role || "CLIENT";
+
+    if (!ALLOWED_PUBLIC_ROLES.includes(selectedRole)) {
+      return res.status(403).json({
+        error: `You cannot sign up as role: ${selectedRole}`,
+      });
+    }
+
     const strongPassword =
       /^(?=.*[0-9])(?=.*[!@#$%^&*])[A-Za-z0-9!@#$%^&*]{6,}$/;
 
@@ -37,7 +45,6 @@ app.post("/signup", async (req, res) => {
       });
     }
 
-    // Email validation
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ error: "Email already registered" });
@@ -46,26 +53,27 @@ app.post("/signup", async (req, res) => {
     const hashed = await hashPassword(password);
 
     const user = await prisma.user.create({
-      data: { name, email, password: hashed, role },
+      data: { name, email, password: hashed, role: selectedRole },
     });
 
-    // Auto-create correct profile
-    if (role === "THERAPIST") {
-      await prisma.therapistProfile.create({
-        data: {
-          userId: user.id,
-          bio: "",
-          specialization: "",
-          availability: "",
-        },
-      });
-    } else if (role === "USER") {
+    if (selectedRole === "CLIENT") {
       await prisma.clientProfile.create({
         data: {
           userId: user.id,
           notes: "",
           preferences: "",
           emergencyContact: "",
+        },
+      });
+    }
+
+    if (selectedRole === "THERAPIST" || selectedRole === "INTERN") {
+      await prisma.therapistProfile.create({
+        data: {
+          userId: user.id,
+          bio: "",
+          specialization: "",
+          availability: "",
         },
       });
     }
@@ -96,14 +104,10 @@ app.post("/login", async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { email } });
 
-    if (!user) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
+    if (!user) return res.status(400).json({ error: "Invalid credentials" });
 
     const valid = await comparePasswords(password, user.password);
-    if (!valid) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
+    if (!valid) return res.status(400).json({ error: "Invalid credentials" });
 
     const token = generateToken(user);
 
@@ -123,7 +127,7 @@ app.post("/login", async (req, res) => {
 });
 
 // ----------------------
-// ME (AUTH CHECK)
+// ME
 // ----------------------
 app.get("/me", requireAuth, async (req, res) => {
   try {
@@ -152,7 +156,7 @@ app.get("/me", requireAuth, async (req, res) => {
 app.post(
   "/therapist/link-client",
   requireAuth,
-  requireRole("THERAPIST"),
+  requireRole(["THERAPIST", "INTERN", "PRACTICE_MANAGER_ADMIN", "OWNER"]),
   async (req, res) => {
     try {
       const { email } = req.body;
@@ -162,8 +166,8 @@ app.post(
 
       const client = await prisma.user.findUnique({ where: { email } });
 
-      if (!client || client.role !== "USER") {
-        return res.status(404).json({ error: "Client not found" });
+      if (!client || client.role !== "CLIENT") {
+        return res.status(404).json({ error: "Client not found or invalid role." });
       }
 
       const link = await prisma.therapistClient.upsert({
@@ -197,7 +201,7 @@ app.post(
 app.get(
   "/therapist/clients",
   requireAuth,
-  requireRole("THERAPIST"),
+  requireRole(["THERAPIST", "INTERN"]),
   async (req, res) => {
     try {
       const therapistId = req.user.id;
@@ -206,11 +210,7 @@ app.get(
         where: { therapistId },
         include: {
           client: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
+            select: { id: true, name: true, email: true },
           },
         },
       });
@@ -232,7 +232,7 @@ app.get(
 app.get(
   "/client/dashboard",
   requireAuth,
-  requireRole("USER"),
+  requireRole(["CLIENT"]),
   async (req, res) => {
     try {
       const clientId = req.user.id;
@@ -335,23 +335,19 @@ app.get("/messages/thread/:otherUserId", requireAuth, async (req, res) => {
 });
 
 // ----------------------
-// MESSAGE LIST (WHO CAN I CHAT WITH?)
+// MESSAGE LIST
 // ----------------------
 app.get("/messages/list", requireAuth, async (req, res) => {
   try {
     const userId = req.user.id;
     const role = req.user.role;
 
-    if (role === "THERAPIST") {
+    if (role === "THERAPIST" || role === "INTERN") {
       const links = await prisma.therapistClient.findMany({
         where: { therapistId: userId },
         include: {
           client: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
+            select: { id: true, name: true, email: true },
           },
         },
       });
@@ -361,16 +357,12 @@ app.get("/messages/list", requireAuth, async (req, res) => {
       });
     }
 
-    if (role === "USER") {
+    if (role === "CLIENT") {
       const link = await prisma.therapistClient.findFirst({
         where: { clientId: userId },
         include: {
           therapist: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
+            select: { id: true, name: true, email: true },
           },
         },
       });
@@ -380,12 +372,96 @@ app.get("/messages/list", requireAuth, async (req, res) => {
       });
     }
 
-    res.status(400).json({ error: "Invalid role" });
+    res.status(403).json({ error: "Role cannot use messaging." });
   } catch (err) {
     console.error("list error:", err);
     res.status(500).json({ error: "Something went wrong" });
   }
 });
+
+// ----------------------
+// OWNER DASHBOARD
+// ----------------------
+app.get(
+  "/owner/dashboard",
+  requireAuth,
+  requireRole(["OWNER"]),
+  async (req, res) => {
+    try {
+      const now = new Date();
+
+      const [
+        totalUsers,
+        owners,
+        practiceManagersAdmin,
+        practiceManagersClinical,
+        therapists,
+        interns,
+        clients,
+        totalAppointments,
+        upcomingAppointments,
+        totalMessages,
+        recentUsers,
+      ] = await Promise.all([
+        prisma.user.count(),
+        prisma.user.count({ where: { role: "OWNER" } }),
+        prisma.user.count({ where: { role: "PRACTICE_MANAGER_ADMIN" } }),
+        prisma.user.count({ where: { role: "PRACTICE_MANAGER_CLINICAL" } }),
+        prisma.user.count({ where: { role: "THERAPIST" } }),
+        prisma.user.count({ where: { role: "INTERN" } }),
+        prisma.user.count({ where: { role: "CLIENT" } }),
+        prisma.appointment.count(),
+        prisma.appointment.findMany({
+          where: { time: { gte: now } },
+          include: {
+            therapist: { select: { id: true, name: true, email: true } },
+            client: { select: { id: true, name: true, email: true } },
+          },
+          orderBy: { time: "asc" },
+          take: 10,
+        }),
+        prisma.message.count(),
+        prisma.user.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+
+      res.json({
+        stats: {
+          users: {
+            total: totalUsers,
+            owners,
+            practiceManagersAdmin,
+            practiceManagersClinical,
+            therapists,
+            interns,
+            clients,
+          },
+          messages: {
+            total: totalMessages,
+          },
+          appointments: {
+            total: totalAppointments,
+            upcomingCount: upcomingAppointments.length,
+          },
+        },
+        upcomingAppointments,
+        recentUsers,
+      });
+    } catch (err) {
+      console.error("owner/dashboard error:", err);
+      res.status(500).json({ error: "Failed to load owner dashboard" });
+    }
+  }
+);
 
 // ----------------------
 // START SERVER
@@ -394,5 +470,3 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`✅ Server running on http://127.0.0.1:${PORT}`);
 });
-
-

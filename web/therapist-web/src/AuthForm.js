@@ -7,12 +7,25 @@ export default function AuthForm() {
 
   const [mode, setMode] = useState("login");
   const [name, setName] = useState("");
-  const [role, setRole] = useState("USER");
+  const [role, setRole] = useState("CLIENT"); // DEFAULT
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
-  const handleLogin = async (e) => {
+  const redirectByRole = (role) => {
+    if (role === "OWNER") return navigate("/owner-dashboard");
+    if (role === "PRACTICE_MANAGER_ADMIN")
+      return navigate("/practice-manager-admin");
+    if (role === "PRACTICE_MANAGER_CLINICAL")
+      return navigate("/practice-manager-clinical");
+    if (role === "THERAPIST") return navigate("/therapist-dashboard");
+    if (role === "INTERN") return navigate("/intern-dashboard");
+    if (role === "CLIENT") return navigate("/client-dashboard");
+
+    navigate("/client-dashboard");
+  };
+
+  const handleLogin = (e) => {
     e.preventDefault();
     setError("");
 
@@ -21,15 +34,12 @@ export default function AuthForm() {
       .then((res) => {
         localStorage.setItem("token", res.data.token);
 
-        const role = res.data.user.role;
-
-        if (role === "THERAPIST") navigate("/therapist-dashboard");
-        else navigate("/client-dashboard");
+        redirectByRole(res.data.user.role);
       })
       .catch(() => setError("Invalid email or password"));
   };
 
-  const handleRegister = async (e) => {
+  const handleRegister = (e) => {
     e.preventDefault();
     setError("");
 
@@ -42,9 +52,7 @@ export default function AuthForm() {
       })
       .then((res) => {
         localStorage.setItem("token", res.data.token);
-
-        if (role === "THERAPIST") navigate("/therapist-dashboard");
-        else navigate("/client-dashboard");
+        redirectByRole(res.data.user.role);
       })
       .catch((err) => {
         const msg = err.response?.data?.error || "Signup failed";
@@ -58,6 +66,7 @@ export default function AuthForm() {
 
       {error && <p style={{ color: "red" }}>{error}</p>}
 
+      {/* LOGIN */}
       {mode === "login" && (
         <form onSubmit={handleLogin}>
           <input
@@ -78,6 +87,7 @@ export default function AuthForm() {
         </form>
       )}
 
+      {/* REGISTER */}
       {mode === "register" && (
         <form onSubmit={handleRegister}>
           <input
@@ -102,8 +112,9 @@ export default function AuthForm() {
           />
 
           <select onChange={(e) => setRole(e.target.value)}>
-            <option value="USER">Client</option>
+            <option value="CLIENT">Client</option>
             <option value="THERAPIST">Therapist</option>
+            <option value="INTERN">Intern</option>
           </select>
 
           <button type="submit">Create Account</button>

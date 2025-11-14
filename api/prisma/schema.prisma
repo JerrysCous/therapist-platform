@@ -12,7 +12,7 @@ model User {
   name      String
   email     String   @unique
   password  String
-  role      Role     @default(USER)
+  role      Role     @default(CLIENT)
   createdAt DateTime @default(now())
 
   therapistProfile TherapistProfile?
@@ -85,8 +85,12 @@ model TherapistClient {
 }
 
 enum Role {
-  USER
+  OWNER
+  PRACTICE_MANAGER_ADMIN
+  PRACTICE_MANAGER_CLINICAL
   THERAPIST
+  INTERN
+  CLIENT
 }
 
 enum AppointmentStatus {
