@@ -26,9 +26,12 @@ model User {
   therapistAppointments Appointment[] @relation("TherapistAppointments")
   clientAppointments    Appointment[] @relation("ClientAppointments")
 
-  // Linking (renamed model from TherapistClient → TherapistLink)
+  // Mapping between therapist + client
   therapistLinks TherapistLink[] @relation("TherapistClients")
   clientLinks    TherapistLink[] @relation("ClientTherapist")
+
+  // 👇 NEW REQUIRED OPPOSITE RELATION FOR AVAILABILITY
+  availabilitySlots AvailabilitySlot[]
 }
 
 model TherapistProfile {
@@ -68,14 +71,12 @@ model Appointment {
   clientId    Int
   time        DateTime
   status      AppointmentStatus @default(PENDING)
+  reason      String?   // ← added for appointment purpose
 
   therapist User @relation("TherapistAppointments", fields: [therapistId], references: [id])
   client    User @relation("ClientAppointments", fields: [clientId], references: [id])
 }
 
-//
-// 🔥 FIXED MODEL — Renamed to avoid Prisma Studio bug
-//
 model TherapistLink {
   id          Int @id @default(autoincrement())
   therapistId Int
@@ -85,6 +86,17 @@ model TherapistLink {
   client    User @relation("ClientTherapist", fields: [clientId], references: [id])
 
   @@unique([therapistId, clientId])
+}
+
+model AvailabilitySlot {
+  id          Int @id @default(autoincrement())
+  therapistId Int
+
+  weekday     Int    // 0 = Sunday ... 6 = Saturday
+  startTime   String // "09:00" 24h format
+  endTime     String // "12:00"
+
+  therapist User @relation(fields: [therapistId], references: [id])
 }
 
 enum Role {
@@ -102,4 +114,5 @@ enum AppointmentStatus {
   COMPLETED
   CANCELLED
 }
+
 
