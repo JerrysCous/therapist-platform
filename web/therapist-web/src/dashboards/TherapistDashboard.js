@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import AvailabilityForm from "./AvailabilityForm";
+import { Link } from "react-router-dom";
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function TherapistDashboard() {
   const [profile, setProfile] = useState(null);
@@ -11,163 +14,143 @@ export default function TherapistDashboard() {
 
   const token = localStorage.getItem("token");
 
-  // ------------------------------
-  // LOAD AVAILABILITY (Wrapped in useCallback)
-  // ------------------------------
+  // -------------------------
+  // FETCH AVAILABILITY
+  // -------------------------
   const loadAvailability = useCallback(async () => {
     try {
-      const res = await axios.get("http://127.0.0.1:4000/availability/get", {
-        headers: { Authorization: "Bearer " + token }
+      const res = await axios.get("http://127.0.0.1:4000/availability/my", {
+        headers: { Authorization: `Bearer ${token}` }
       });
 
-      setAvailability(res.data.slots || []);
+      const unique = res.data.slots
+        .filter((s, i, arr) => arr.findIndex(x => x.id === s.id) === i)
+        .sort((a, b) => a.weekday - b.weekday || a.startTime.localeCompare(b.startTime));
+
+      setAvailability(unique);
     } catch (err) {
-      console.error("Failed to load availability:", err.response?.data || err);
-      setAvailability([]);
+      console.error("Error loading availability:", err.response?.data || err);
     }
   }, [token]);
 
-  // ------------------------------
-  // LOAD DASHBOARD (Profile / Clients / Appts)
-  // ------------------------------
+  // -------------------------
+  // INITIAL DASHBOARD LOAD
+  // -------------------------
   useEffect(() => {
     if (!token) return (window.location.href = "/");
 
     axios
       .get("http://127.0.0.1:4000/therapist/dashboard", {
-        headers: { Authorization: "Bearer " + token }
+        headers: { Authorization: `Bearer ${token}` }
       })
       .then((res) => {
         setProfile(res.data.profile);
-        setClients(res.data.clients);
-        setAppointments(res.data.appointments);
+        setClients(res.data.clients || []);
+        setAppointments(res.data.appointments || []);
         setLoading(false);
       })
       .catch((err) => {
-        console.error("Dashboard load error:", err.response?.data || err);
-        alert("Error loading therapist dashboard");
+        console.error("Therapist dashboard error:", err.response?.data || err);
         window.location.href = "/";
       });
 
     loadAvailability();
   }, [token, loadAvailability]);
 
-  // ------------------------------
-  // REMOVE AVAILABILITY SLOT
-  // ------------------------------
-  const removeSlot = async (id) => {
-    if (!window.confirm("Remove this availability slot?")) return;
 
+  // -------------------------
+  // DELETE SLOT
+  // -------------------------
+  const deleteSlot = async (id) => {
     try {
-      await axios.delete(`http://127.0.0.1:4000/availability/delete/${id}`, {
-        headers: { Authorization: "Bearer " + token }
+      await axios.delete(`http://127.0.0.1:4000/availability/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
 
-      setAvailability((prev) => prev.filter((s) => s.id !== id));
+      setAvailability(prev => prev.filter(slot => slot.id !== id));
     } catch (err) {
       console.error("Delete slot error:", err.response?.data || err);
-      alert("Failed to delete slot");
+      alert("Failed to delete slot.");
     }
   };
 
-  // ------------------------------
-  // RENDER LOADING
-  // ------------------------------
+
   if (loading) return <h2>Loading Therapist Dashboard...</h2>;
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h1>Therapist Dashboard</h1>
+  <div style={{ padding: "20px" }}>
+    <h1>Therapist Dashboard</h1>
 
-      {/* ---------------- PROFILE ---------------- */}
-      <h2>Profile</h2>
-      <p><strong>Bio:</strong> {profile?.bio || "No bio"}</p>
-      <p><strong>Specialization:</strong> {profile?.specialization || "None"}</p>
+    {/* NAV BUTTONS */}
+    <div style={{ marginBottom: "20px" }}>
+      <Link to="/therapist/availability">
+        <button style={{ marginRight: "10px" }}>
+          Manage Availability
+        </button>
+      </Link>
 
-      {/* ---------------- AVAILABILITY ---------------- */}
-      <h2>Your Availability</h2>
+      <Link to="/appointments/pending">
+        <button>
+          View Pending Appointment Requests
+        </button>
+      </Link>
+    </div>
 
-      {availability.length === 0 ? (
-        <p>No availability set.</p>
-      ) : (
-        <table style={{ borderCollapse: "collapse", width: "500px", marginBottom: "20px" }}>
-          <thead>
-            <tr>
-              <th style={th}>Day</th>
-              <th style={th}>Start</th>
-              <th style={th}>End</th>
-              <th style={th}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {availability.map((slot) => (
-              <tr key={slot.id}>
-                <td style={td}>{weekdayName(slot.weekday)}</td>
-                <td style={td}>{slot.startTime}</td>
-                <td style={td}>{slot.endTime}</td>
-                <td style={td}>
-                  <button
-                    onClick={() => removeSlot(slot.id)}
-                    style={{
-                      background: "red",
-                      color: "white",
-                      padding: "5px 10px",
-                      border: "none",
-                      cursor: "pointer",
-                      borderRadius: "4px",
-                    }}
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+    {/* PROFILE */}
+    <h2>Profile</h2>
+    <p><strong>Bio:</strong> {profile?.bio || "No bio"}</p>
+    <p><strong>Specialization:</strong> {profile?.specialization || "None"}</p>
 
-      {/* Add availability form */}
-      <AvailabilityForm refresh={loadAvailability} />
+    {/* AVAILABILITY SECTION */}
+    <h2>Availability</h2>
+    <AvailabilityForm onUpdated={loadAvailability} />
 
-      {/* ---------------- CLIENTS ---------------- */}
-      <h2>Clients</h2>
-      <ul>
-        {clients.length === 0 ? <li>No clients</li> : clients.map((c) => (
-          <li key={c.id}>{c.name} ({c.email})</li>
-        ))}
-      </ul>
+    <ul>
+      {availability.length === 0 && <li>No availability set</li>}
+      {availability.map((slot) => (
+        <li key={slot.id}>
+          <strong>{WEEKDAYS[slot.weekday]}:</strong> {slot.startTime} - {slot.endTime}
+          <button
+            onClick={() => deleteSlot(slot.id)}
+            style={{
+              marginLeft: "10px",
+              background: "red",
+              color: "white",
+              border: "none",
+              padding: "5px 8px",
+              cursor: "pointer",
+            }}
+          >
+            Delete
+          </button>
+        </li>
+      ))}
+    </ul>
 
-      {/* ---------------- APPOINTMENTS ---------------- */}
-      <h2>Appointments</h2>
-      <ul>
-        {appointments.length === 0 ? (
-          <li>No appointments</li>
-        ) : (
-          appointments.map((a) => (
-            <li key={a.id}>
-              {new Date(a.time).toLocaleString()} — {a.client?.name}
+    {/* CLIENT LIST */}
+    <h2>Clients</h2>
+    <ul>
+      {clients.length === 0 
+        ? <li>No clients yet</li>
+        : clients.map((c) => (
+            <li key={c.id}>{c.name} ({c.email})</li>
+          ))
+      }
+    </ul>
+
+    {/* APPOINTMENTS */}
+    <h2>Appointments</h2>
+    <ul>
+      {appointments.length === 0 
+        ? <li>No appointments</li>
+        : appointments.map((appt) => (
+            <li key={appt.id}>
+              {new Date(appt.time).toLocaleString()} — {appt.client?.name}
             </li>
           ))
-        )}
-      </ul>
-    </div>
-  );
+      }
+    </ul>
+
+  </div>
+);
 }
-
-// --------------------
-// Helper Functions
-// --------------------
-function weekdayName(num) {
-  return ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][num];
-}
-
-const th = {
-  border: "1px solid #ccc",
-  padding: "8px",
-  background: "#f5f5f5",
-};
-
-const td = {
-  border: "1px solid #ccc",
-  padding: "8px",
-};

@@ -2,88 +2,75 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 
 export default function PracticeManagerClinical() {
-  const [data, setData] = useState(null);
-  const token = localStorage.getItem("token");
+  const [therapists, setTherapists] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      window.location.href = "/";
+      return;
+    }
+
     axios
       .get("http://127.0.0.1:4000/practice-manager-clinical/dashboard", {
         headers: { Authorization: `Bearer ${token}` },
       })
-      .then((res) => setData(res.data))
-      .catch(() => alert("Error loading dashboard"));
+      .then((res) => {
+        console.log("CLINICAL DASHBOARD:", res.data);
+        setTherapists(res.data.therapists || []); // ← SAFE
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Clinical dashboard error:", err.response?.data || err);
+        setError("Failed to load clinical dashboard");
+        setLoading(false);
+      });
   }, []);
 
-  if (!data) return <h2>Loading Clinical Manager Dashboard...</h2>;
-
-  const { therapists, interns, clients, upcomingAppointments, allAppointments } = data;
+  if (loading) return <h2>Loading Clinical Dashboard...</h2>;
+  if (error) return <p style={{ color: "red" }}>{error}</p>;
 
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto" }}>
-      <h1>Clinical Manager Dashboard</h1>
+    <div style={{ padding: "20px" }}>
+      <h1>Practice Manager Clinical Dashboard</h1>
+      <h2>Therapists & Interns</h2>
 
-      <hr />
-
-      <h2>Therapists</h2>
-      <ul>
-        {therapists.map((t) => (
-          <li key={t.id}>
-            {t.name} ({t.email})
-          </li>
-        ))}
-      </ul>
-
-      <hr />
-
-      <h2>Interns</h2>
-      <ul>
-        {interns.map((i) => (
-          <li key={i.id}>
-            {i.name} ({i.email})
-          </li>
-        ))}
-      </ul>
-
-      <hr />
-
-      <h2>Clients</h2>
-      <ul>
-        {clients.map((c) => (
-          <li key={c.id}>
-            {c.name} ({c.email})
-          </li>
-        ))}
-      </ul>
-
-      <hr />
-
-      <h2>Upcoming Appointments</h2>
-      {upcomingAppointments.length === 0 ? (
-        <p>No upcoming appointments</p>
+      {therapists.length === 0 ? (
+        <p>No therapists found.</p>
       ) : (
-        <ul>
-          {upcomingAppointments.map((a) => (
-            <li key={a.id}>
-              {new Date(a.time).toLocaleString()} — Therapist: {a.therapist.name}, Client: {a.client.name}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <hr />
-
-      <h2>All Appointments</h2>
-      {allAppointments.length === 0 ? (
-        <p>No appointments in system</p>
-      ) : (
-        <ul>
-          {allAppointments.map((a) => (
-            <li key={a.id}>
-              {new Date(a.time).toLocaleString()} — Therapist: {a.therapist.name}, Client: {a.client.name}
-            </li>
-          ))}
-        </ul>
+        <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: "600px" }}>
+          <thead>
+            <tr>
+              <th style={th}>ID</th>
+              <th style={th}>Name</th>
+              <th style={th}>Email</th>
+            </tr>
+          </thead>
+          <tbody>
+            {therapists.map((t) => (
+              <tr key={t.id}>
+                <td style={td}>{t.id}</td>
+                <td style={td}>{t.name}</td>
+                <td style={td}>{t.email}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );
 }
+
+const th = {
+  border: "1px solid #ccc",
+  padding: "8px",
+  textAlign: "left",
+  background: "#eee",
+};
+
+const td = {
+  border: "1px solid #ccc",
+  padding: "8px",
+};

@@ -807,6 +807,31 @@ app.get(
 );
 
 
+// ----------------------
+// GET AVAILABILITY FOR ANY THERAPIST
+// ----------------------
+app.get(
+  "/availability/therapist/:therapistId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const therapistId = parseInt(req.params.therapistId, 10);
+
+      const slots = await prisma.availabilitySlot.findMany({
+        where: { therapistId },
+        orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
+      });
+
+      res.json({ slots });
+    } catch (err) {
+      console.error("availability/therapist error:", err);
+      res.status(500).json({ error: "Failed to load availability" });
+    }
+  }
+);
+
+
+
 
 // ----------------------
 // DELETE AVAILABILITY SLOT
@@ -844,6 +869,365 @@ app.delete(
     } catch (err) {
       console.error("delete availability error:", err);
       res.status(500).json({ error: "Failed to delete slot" });
+    }
+  }
+);
+
+
+// -----------------------------------------------------
+// CLIENT → REQUEST APPOINTMENT
+// -----------------------------------------------------
+app.post(
+  "/appointments/request",
+  requireAuth,
+  requireRole("CLIENT"),
+  async (req, res) => {
+    try {
+      const clientId = req.user.id;
+      const { therapistId, time, reason } = req.body;
+
+      if (!therapistId || !time) {
+        return res.status(400).json({ error: "Therapist and time required" });
+      }
+
+      // Check therapist exists
+      const therapist = await prisma.user.findUnique({
+        where: { id: therapistId },
+      });
+
+      if (!therapist || !["THERAPIST", "INTERN"].includes(therapist.role)) {
+        return res.status(404).json({ error: "Invalid therapist" });
+      }
+
+      // Check availability slot match
+      const date = new Date(time);
+      const weekday = date.getDay(); // 0-6
+      const timeStr = date.toTimeString().slice(0, 5); // "13:30"
+
+      const slot = await prisma.availabilitySlot.findFirst({
+        where: {
+          therapistId,
+          weekday,
+          startTime: { lte: timeStr },
+          endTime: { gte: timeStr },
+        },
+      });
+
+      if (!slot) {
+        return res.status(400).json({
+          error: "Therapist is not available at this time",
+        });
+      }
+
+      // Prevent double booking
+      const conflict = await prisma.appointment.findFirst({
+        where: {
+          therapistId,
+          time: new Date(time),
+          status: { in: ["PENDING", "CONFIRMED"] },
+        },
+      });
+
+      if (conflict) {
+        return res
+          .status(409)
+          .json({ error: "There is already an appointment at this time" });
+      }
+
+      // Create the appointment request
+      const appt = await prisma.appointment.create({
+        data: {
+          therapistId,
+          clientId,
+          time: new Date(time),
+          status: "PENDING",
+          reason: reason || "",
+        },
+      });
+
+      res.json({
+        success: true,
+        message: "Appointment request submitted",
+        appointment: appt,
+      });
+    } catch (err) {
+      console.error("appointment request error:", err);
+      res.status(500).json({ error: "Failed to request appointment" });
+    }
+  }
+);
+
+
+// ----------------------
+// APPOINTMENT LIST BY ROLE
+// ----------------------
+app.get("/appointments", requireAuth, async (req, res) => {
+  try {
+    const role = req.user.role;
+    const userId = req.user.id;
+
+    let appointments = [];
+
+    // OWNER / ADMIN: Full visibility
+    if (role === "OWNER" || role === "PRACTICE_MANAGER_ADMIN") {
+      appointments = await prisma.appointment.findMany({
+        include: {
+          therapist: { select: { id: true, name: true } },
+          client: { select: { id: true, name: true } },
+        },
+        orderBy: { time: "asc" },
+      });
+    }
+
+    // CLINICAL MANAGER: Can see ALL therapists & interns
+    else if (role === "PRACTICE_MANAGER_CLINICAL") {
+      appointments = await prisma.appointment.findMany({
+        where: {
+          therapist: {
+            role: { in: ["THERAPIST", "INTERN"] }
+          }
+        },
+        include: {
+          therapist: { select: { id: true, name: true } },
+          client: { select: { id: true, name: true } },
+        },
+        orderBy: { time: "asc" },
+      });
+    }
+
+    // THERAPIST / INTERN: Only their own appointments
+    else if (role === "THERAPIST" || role === "INTERN") {
+      appointments = await prisma.appointment.findMany({
+        where: { therapistId: userId },
+        include: {
+          therapist: { select: { id: true, name: true } },
+          client: { select: { id: true, name: true } },
+        },
+        orderBy: { time: "asc" },
+      });
+    }
+
+    // CLIENT: Only their own
+    else if (role === "CLIENT") {
+      appointments = await prisma.appointment.findMany({
+        where: { clientId: userId },
+        include: {
+          therapist: { select: { id: true, name: true } },
+          client: { select: { id: true, name: true } },
+        },
+        orderBy: { time: "asc" },
+      });
+    }
+
+    else {
+      return res.status(403).json({ error: "Role cannot view appointments" });
+    }
+
+    res.json({ appointments });
+
+  } catch (err) {
+    console.error("appointment list error:", err);
+    res.status(500).json({ error: "Failed to load appointments" });
+  }
+});
+
+
+// ----------------------
+// THERAPIST: VIEW PENDING REQUESTS
+// ----------------------
+app.get(
+  "/appointments/pending",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const therapistId = req.user.id;
+
+      const pending = await prisma.appointment.findMany({
+        where: {
+          therapistId,
+          status: "PENDING"
+        },
+        include: {
+          client: {
+            select: { id: true, name: true, email: true }
+          }
+        },
+        orderBy: { time: "asc" }
+      });
+
+      res.json({ pending });
+    } catch (err) {
+      console.error("pending appts error:", err);
+      res.status(500).json({ error: "Failed to load pending requests" });
+    }
+  }
+);
+
+
+// ----------------------
+// APPROVE APPOINTMENT
+// ----------------------
+app.post(
+  "/appointments/:id/approve",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const therapistId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({ where: { id } });
+
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      if (appt.therapistId !== therapistId)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const updated = await prisma.appointment.update({
+        where: { id },
+        data: { status: "CONFIRMED" }
+      });
+
+      res.json({ success: true, appointment: updated });
+    } catch (err) {
+      console.error("approve error:", err);
+      res.status(500).json({ error: "Failed to approve appointment" });
+    }
+  }
+);
+
+
+// ----------------------
+// DENY APPOINTMENT
+// ----------------------
+app.post(
+  "/appointments/:id/deny",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const therapistId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({ where: { id } });
+
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      if (appt.therapistId !== therapistId)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const updated = await prisma.appointment.update({
+        where: { id },
+        data: { status: "CANCELLED" }
+      });
+
+      res.json({ success: true, appointment: updated });
+    } catch (err) {
+      console.error("deny error:", err);
+      res.status(500).json({ error: "Failed to deny appointment" });
+    }
+  }
+);
+
+
+// APPROVE OR DENY APPOINTMENT
+app.post(
+  "/appointments/:id/update",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const apptId = parseInt(req.params.id, 10);
+      const { status, newTime } = req.body; // status = CONFIRMED or CANCELLED or RESCHEDULED
+      const therapistId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({
+        where: { id: apptId }
+      });
+
+      if (!appt || appt.therapistId !== therapistId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+
+      const updated = await prisma.appointment.update({
+        where: { id: apptId },
+        data: {
+          status,
+          time: newTime ? new Date(newTime) : appt.time
+        }
+      });
+
+      res.json({ success: true, appt: updated });
+
+    } catch (err) {
+      console.error("update appointment error:", err);
+      res.status(500).json({ error: "Failed to update appointment" });
+    }
+  }
+);
+
+
+// ----------------------
+// PUBLIC — GET THERAPIST AVAILABILITY BY ID
+// ----------------------
+app.get(
+  "/therapist/availability/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const therapistId = parseInt(req.params.id, 10);
+
+      if (isNaN(therapistId)) {
+        return res.status(400).json({ error: "Invalid therapist ID" });
+      }
+
+      const slots = await prisma.availabilitySlot.findMany({
+        where: { therapistId },
+        orderBy: [
+          { weekday: "asc" },
+          { startTime: "asc" }
+        ]
+      });
+
+      res.json({ slots });
+    } catch (err) {
+      console.error("therapist availability error:", err);
+      res.status(500).json({ error: "Failed to load therapist availability" });
+    }
+  }
+);
+
+// UPDATE APPOINTMENT STATUS (THERAPIST/INTERN ONLY)
+app.post(
+  "/appointments/:id/status",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { status } = req.body;
+      const therapistId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({ where: { id } });
+
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+      if (appt.therapistId !== therapistId)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const validStatuses = ["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"];
+      if (!validStatuses.includes(status))
+        return res.status(400).json({ error: "Invalid status" });
+
+      const updated = await prisma.appointment.update({
+        where: { id },
+        data: { status }
+      });
+
+      res.json({ success: true, appointment: updated });
+    } catch (err) {
+      console.error("status update error:", err);
+      res.status(500).json({ error: "Failed to update status" });
     }
   }
 );
