@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import axios from "axios";
 import ClientRequestAppointment from "../appointments/ClientRequestAppointment";
 
@@ -32,7 +33,12 @@ export default function ClientDashboard() {
     <div style={{ padding: "20px" }}>
       <h1>Client Dashboard</h1>
 
-      {/* --- Therapist --- */}
+      {/* NAV */}
+      <Link to="/my-appointments">
+        <button style={{ marginBottom: "20px" }}>My Appointments</button>
+      </Link>
+
+      {/* THERAPIST */}
       <h2>Your Therapist</h2>
       {therapist ? (
         <p>
@@ -42,24 +48,17 @@ export default function ClientDashboard() {
         <p>No therapist assigned yet.</p>
       )}
 
-      {/* --- Client Profile --- */}
+      {/* PROFILE */}
       <h2>Your Profile</h2>
-      <p>
-        <strong>Notes:</strong> {profile?.notes || "None"}
-      </p>
-      <p>
-        <strong>Preferences:</strong> {profile?.preferences || "None"}
-      </p>
-      <p>
-        <strong>Emergency Contact:</strong>{" "}
-        {profile?.emergencyContact || "Not set"}
-      </p>
+      <p><strong>Notes:</strong> {profile?.notes || "None"}</p>
+      <p><strong>Preferences:</strong> {profile?.preferences || "None"}</p>
+      <p><strong>Emergency Contact:</strong> {profile?.emergencyContact || "Not set"}</p>
 
-      {/* --- Appointment Request --- */}
+      {/* REQUEST APPOINTMENT */}
       <h2>Request Appointment</h2>
       <ClientRequestAppointment therapist={therapist} />
 
-      {/* --- Upcoming Appointments --- */}
+      {/* UPCOMING APPOINTMENTS */}
       <h2>Upcoming Appointments</h2>
       {appointments.length === 0 ? (
         <p>No appointments scheduled</p>

@@ -274,6 +274,36 @@ app.get(
 
 
 // ----------------------
+// CLIENT — VIEW MY APPOINTMENTS
+// ----------------------
+app.get(
+  "/client/my-appointments",
+  requireAuth,
+  requireRole("CLIENT"),
+  async (req, res) => {
+    try {
+      const clientId = req.user.id;
+
+      const appointments = await prisma.appointment.findMany({
+        where: { clientId },
+        include: {
+          therapist: { select: { id: true, name: true } },
+        },
+        orderBy: { time: "asc" },
+      });
+
+      res.json({ appointments });
+    } catch (err) {
+      console.error("my-appointments error:", err);
+      res.status(500).json({ error: "Failed to load appointments" });
+    }
+  }
+);
+
+
+
+
+// ----------------------
 // SEND MESSAGE
 // ----------------------
 app.post("/messages/send", requireAuth, async (req, res) => {
@@ -957,6 +987,114 @@ app.post(
   }
 );
 
+// ----------------------
+// CLIENT — CANCEL OWN APPOINTMENT
+// ----------------------
+app.post(
+  "/client/appointments/:id/cancel",
+  requireAuth,
+  requireRole("CLIENT"),
+  async (req, res) => {
+    try {
+      const apptId = parseInt(req.params.id, 10);
+      const clientId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({
+        where: { id: apptId },
+      });
+
+      if (!appt) {
+        return res.status(404).json({ error: "Appointment not found" });
+      }
+
+      if (appt.clientId !== clientId) {
+        return res.status(403).json({ error: "Not authorized to cancel this appointment" });
+      }
+
+      const now = new Date();
+      if (appt.time < now) {
+        return res
+          .status(400)
+          .json({ error: "You cannot cancel an appointment that is in the past." });
+      }
+
+      if (["CANCELLED", "COMPLETED"].includes(appt.status)) {
+        return res
+          .status(400)
+          .json({ error: "This appointment is already finalized and cannot be cancelled." });
+      }
+
+      const updated = await prisma.appointment.update({
+        where: { id: apptId },
+        data: { status: "CANCELLED" },
+      });
+
+      res.json({
+        success: true,
+        message: "Appointment cancelled.",
+        appointment: updated,
+      });
+    } catch (err) {
+      console.error("client cancel appt error:", err);
+      res.status(500).json({ error: "Failed to cancel appointment" });
+    }
+  }
+);
+
+
+// --------------------------------------
+// CLIENT — REQUEST RESCHEDULE
+// --------------------------------------
+app.post(
+  "/client/appointments/:id/reschedule",
+  requireAuth,
+  requireRole("CLIENT"),
+  async (req, res) => {
+    try {
+      const apptId = parseInt(req.params.id, 10);
+      const clientId = req.user.id;
+      const { newTime } = req.body;
+
+      if (!newTime) {
+        return res.status(400).json({ error: "New time is required." });
+      }
+
+      const appt = await prisma.appointment.findUnique({
+        where: { id: apptId },
+      });
+
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      if (appt.clientId !== clientId)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      if (["CANCELLED", "COMPLETED"].includes(appt.status))
+        return res
+          .status(400)
+          .json({ error: "Cannot reschedule completed or cancelled appointment" });
+
+      const updated = await prisma.appointment.update({
+        where: { id: apptId },
+        data: {
+          status: "RESCHEDULE_REQUESTED",
+          requestedTime: new Date(newTime),
+        },
+      });
+
+      res.json({
+        success: true,
+        message: "Reschedule request sent.",
+        appointment: updated,
+      });
+    } catch (err) {
+      console.error("reschedule request error:", err);
+      res.status(500).json({ error: "Failed to request reschedule" });
+    }
+  }
+);
+
+
+
 
 // ----------------------
 // APPOINTMENT LIST BY ROLE
@@ -1231,6 +1369,201 @@ app.post(
     }
   }
 );
+
+
+// ----------------------
+// THERAPIST — COMPLETED APPOINTMENTS
+// ----------------------
+app.get(
+  "/therapist/completed-appointments",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const therapistId = req.user.id;
+
+      const now = new Date();
+
+      const completed = await prisma.appointment.findMany({
+        where: {
+          therapistId,
+          status: "CONFIRMED",
+          time: { lt: now }, // past appointments
+        },
+        include: {
+          client: { select: { id: true, name: true } },
+        },
+        orderBy: { time: "desc" },
+      });
+
+      res.json({ completed });
+    } catch (err) {
+      console.error("completed appts error:", err);
+      res.status(500).json({ error: "Failed to load completed appointments" });
+    }
+  }
+);
+
+
+// ----------------------
+// THERAPIST — MARK APPOINTMENT AS COMPLETED
+// ----------------------
+app.post(
+  "/appointments/:id/complete",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const apptId = parseInt(req.params.id, 10);
+      const therapistId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({
+        where: { id: apptId },
+      });
+
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      if (appt.therapistId !== therapistId)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const updated = await prisma.appointment.update({
+        where: { id: apptId },
+        data: { status: "COMPLETED" },
+      });
+
+      res.json({
+        success: true,
+        message: "Appointment marked as completed",
+        appointment: updated,
+      });
+    } catch (err) {
+      console.error("complete appointment error:", err);
+      res.status(500).json({ error: "Failed to complete appointment" });
+    }
+  }
+);
+
+
+// --------------------------------------
+// THERAPIST — APPROVE RESCHEDULE
+// --------------------------------------
+app.post(
+  "/therapist/appointments/:id/reschedule-approve",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const apptId = parseInt(req.params.id, 10);
+      const { newTime } = req.body;
+      const therapistId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({
+        where: { id: apptId },
+      });
+
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      if (appt.therapistId !== therapistId)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const updated = await prisma.appointment.update({
+        where: { id: apptId },
+        data: {
+          status: "RESCHEDULED",
+          time: new Date(newTime),
+        },
+      });
+
+      res.json({
+        success: true,
+        message: "Reschedule approved.",
+        appointment: updated,
+      });
+    } catch (err) {
+      console.error("approve reschedule error:", err);
+      res.status(500).json({ error: "Failed to approve reschedule" });
+    }
+  }
+);
+
+// --------------------------------------
+// THERAPIST — DENY RESCHEDULE
+// --------------------------------------
+app.post(
+  "/therapist/appointments/:id/reschedule-deny",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const apptId = parseInt(req.params.id, 10);
+      const therapistId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({
+        where: { id: apptId },
+      });
+
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      if (appt.therapistId !== therapistId)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const updated = await prisma.appointment.update({
+        where: { id: apptId },
+        data: { status: "RESCHEDULE_DENIED" },
+      });
+
+      res.json({
+        success: true,
+        message: "Reschedule denied.",
+        appointment: updated,
+      });
+    } catch (err) {
+      console.error("deny reschedule error:", err);
+      res.status(500).json({ error: "Failed to deny reschedule" });
+    }
+  }
+);
+
+
+// --------------------------------------
+// THERAPIST DIRECT RESCHEDULE
+// --------------------------------------
+app.post(
+  "/therapist/appointments/:id/reschedule-change",
+  requireAuth,
+  requireRole("THERAPIST", "INTERN"),
+  async (req, res) => {
+    try {
+      const apptId = parseInt(req.params.id, 10);
+      const { newTime } = req.body;
+      const therapistId = req.user.id;
+
+      const appt = await prisma.appointment.findUnique({ where: { id: apptId } });
+
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      if (appt.therapistId !== therapistId)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const updated = await prisma.appointment.update({
+        where: { id: apptId },
+        data: { status: "RESCHEDULED", time: new Date(newTime) },
+      });
+
+      res.json({
+        success: true,
+        message: "Appointment rescheduled.",
+        appointment: updated,
+      });
+    } catch (err) {
+      console.error("direct reschedule error:", err);
+      res.status(500).json({ error: "Failed to reschedule appointment" });
+    }
+  }
+);
+
+
+
 
 
 

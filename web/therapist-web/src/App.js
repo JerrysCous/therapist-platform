@@ -1,6 +1,9 @@
 import { BrowserRouter, Routes, Route, useParams } from "react-router-dom";
 
+// AUTH
 import AuthForm from "./AuthForm";
+
+// DASHBOARDS
 import OwnerDashboard from "./dashboards/OwnerDashboard";
 import PracticeManagerAdmin from "./dashboards/PracticeManagerAdmin";
 import PracticeManagerClinical from "./dashboards/PracticeManagerClinical";
@@ -8,11 +11,20 @@ import TherapistDashboard from "./dashboards/TherapistDashboard";
 import InternDashboard from "./dashboards/InternDashboard";
 import ClientDashboard from "./dashboards/ClientDashboard";
 
-import ChatPage from "./ChatPage";
+// CLIENT APPOINTMENTS
+import MyAppointments from "./dashboards/MyAppointments";
 
-// NEW PAGES
-import TherapistAvailability from "./dashboards/TherapistAvailability";
+// THERAPIST APPOINTMENT PAGES
+import CompletedAppointments from "./dashboards/CompletedAppointments";
 import PendingAppointments from "./dashboards/PendingAppointments";
+import TherapistRescheduleRequests from "./dashboards/TherapistRescheduleRequests";
+import TherapistRescheduleDirect from "./dashboards/TherapistRescheduleDirect";
+
+// AVAILABILITY PAGE
+import TherapistAvailability from "./dashboards/TherapistAvailability";
+
+// CHAT
+import ChatPage from "./ChatPage";
 
 // Dynamic Chat Wrapper
 function ChatWrapper() {
@@ -24,7 +36,6 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-
         {/* AUTH */}
         <Route path="/" element={<AuthForm />} />
 
@@ -36,15 +47,20 @@ export default function App() {
         <Route path="/intern-dashboard" element={<InternDashboard />} />
         <Route path="/client-dashboard" element={<ClientDashboard />} />
 
-        {/* APPOINTMENTS */}
-        <Route path="/appointments/pending" element={<PendingAppointments />} />
+        {/* CLIENT */}
+        <Route path="/my-appointments" element={<MyAppointments />} />
 
-        {/* THERAPIST AVAILABILITY PAGE */}
+        {/* THERAPIST APPOINTMENT MANAGEMENT */}
+        <Route path="/appointments/pending" element={<PendingAppointments />} />
+        <Route path="/completed-appointments" element={<CompletedAppointments />} />
+        <Route path="/therapist/reschedule-requests" element={<TherapistRescheduleRequests />} />
+        <Route path="/therapist/reschedule-direct" element={<TherapistRescheduleDirect />} />
+
+        {/* THERAPIST AVAILABILITY */}
         <Route path="/therapist/availability" element={<TherapistAvailability />} />
 
         {/* CHAT */}
         <Route path="/chat/:id" element={<ChatWrapper />} />
-
       </Routes>
     </BrowserRouter>
   );

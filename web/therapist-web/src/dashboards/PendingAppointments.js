@@ -1,109 +1,93 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 
 export default function PendingAppointments() {
   const [pending, setPending] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
 
-  const token = localStorage.getItem("token");
+  const loadPending = useCallback(async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      const res = await axios.get(
+        "http://127.0.0.1:4000/appointments/pending",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      setPending(res.data.pending || []);
+      setLoading(false);
+    } catch (err) {
+      console.error(err);
+      setMessage("Failed to load pending appointments.");
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!token) return (window.location.href = "/");
+    loadPending();
+  }, [loadPending]);
 
-    axios
-      .get("http://127.0.0.1:4000/appointments/pending", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => {
-        setPending(res.data.pending || []);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Pending appointments error:", err.response?.data || err);
-        window.location.href = "/";
-      });
-  }, [token]);
+  async function handleDecision(id, decision) {
+    const endpoint =
+      decision === "approve"
+        ? `/appointments/${id}/approve`
+        : `/appointments/${id}/deny`;
 
-  // --------------------------------------
-  // APPROVE REQUEST
-  // --------------------------------------
-  const approve = async (id) => {
     try {
-      await axios.post(
-        `http://127.0.0.1:4000/appointments/${id}/approve`,
+      const token = localStorage.getItem("token");
+
+      const res = await axios.post(
+        `http://127.0.0.1:4000${endpoint}`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setPending(prev => prev.filter((appt) => appt.id !== id));
+      setMessage(res.data.message || "Updated.");
+      loadPending();
     } catch (err) {
-      console.error("Approve error:", err.response?.data || err);
-      alert("Failed to approve appointment.");
+      console.error(err);
+      setMessage("Failed to update appointment.");
     }
-  };
+  }
 
-  // --------------------------------------
-  // DENY REQUEST
-  // --------------------------------------
-  const deny = async (id) => {
-    try {
-      await axios.post(
-        `http://127.0.0.1:4000/appointments/${id}/deny`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      setPending(prev => prev.filter((appt) => appt.id !== id));
-    } catch (err) {
-      console.error("Deny error:", err.response?.data || err);
-      alert("Failed to deny appointment.");
-    }
-  };
-
-  if (loading) return <h2>Loading Pending Appointments...</h2>;
+  if (loading) return <p>Loading pending requests...</p>;
 
   return (
     <div style={{ padding: "20px" }}>
       <h1>Pending Appointment Requests</h1>
 
+      {message && <p style={{ color: "green" }}>{message}</p>}
+
       {pending.length === 0 ? (
-        <p>No pending requests.</p>
+        <p>No pending appointments.</p>
       ) : (
-        <ul>
+        <ul style={{ listStyle: "none", padding: 0 }}>
           {pending.map((appt) => (
-            <li key={appt.id} style={{ marginBottom: "15px" }}>
-              <strong>{appt.client?.name}</strong> ({appt.client?.email})
-              <br />
-              <span>{new Date(appt.time).toLocaleString()}</span>
-              <br />
+            <li
+              key={appt.id}
+              style={{
+                marginBottom: "20px",
+                border: "1px solid #ccc",
+                padding: "12px",
+                borderRadius: "8px",
+              }}
+            >
+              <p><strong>Client:</strong> {appt.client.name}</p>
+              <p><strong>Time:</strong> {new Date(appt.time).toLocaleString()}</p>
 
               <button
-                onClick={() => approve(appt.id)}
-                style={{
-                  marginTop: "8px",
-                  marginRight: "10px",
-                  background: "green",
-                  color: "white",
-                  border: "none",
-                  padding: "6px 10px",
-                  cursor: "pointer",
-                }}
+                onClick={() => handleDecision(appt.id, "approve")}
+                style={{ marginRight: "10px" }}
               >
                 Approve
               </button>
 
               <button
-                onClick={() => deny(appt.id)}
-                style={{
-                  marginTop: "8px",
-                  background: "red",
-                  color: "white",
-                  border: "none",
-                  padding: "6px 10px",
-                  cursor: "pointer",
-                }}
+                onClick={() => handleDecision(appt.id, "deny")}
+                style={{ background: "red", color: "white" }}
               >
-                Deny
+                Decline
               </button>
             </li>
           ))}
